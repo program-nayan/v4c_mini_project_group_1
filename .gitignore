@@ -1,0 +1,16 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+
+# Environments
+.venv/
+venv/
+env/
+
+# Data & Config files (Keep raw large datasets off Git)
+data/*.csv
+.env
+
+# IDE settings
+.vscode/
+.idea/
