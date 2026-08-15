@@ -1,0 +1,16 @@
+# Data Synthesis & ETL
+pandas>=2.0.0
+numpy>=1.24.0
+Faker>=19.0.0
+
+# Database Connectivity
+SQLAlchemy>=2.0.0
+PyMySQL>=1.1.0
+
+# Web Framework & UI (Phase 4)
+streamlit>=1.30.0
+plotly>=5.18.0
+altair>=5.2.0
+
+# Utilities
+python-dotenv>=1.0.0
