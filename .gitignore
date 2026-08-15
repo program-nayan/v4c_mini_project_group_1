@@ -14,3 +14,7 @@ data/*.csv
 # IDE settings
 .vscode/
 .idea/
+
+
+# macOS
+.DS_Store
