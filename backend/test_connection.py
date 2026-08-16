@@ -12,4 +12,4 @@ result = db.execute_query(
     "SELECT COUNT(*) AS total FROM EMPLOYEES"
 )
  
-print(result)
+print(result, flush=True)

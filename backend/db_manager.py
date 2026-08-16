@@ -17,7 +17,12 @@ class DatabaseConnection:
     def _connect(self, host, user, password, database):
         try:
             self._conn = mysql.connector.connect(
-                host=host, user=user, password=password, database=database
+                host=host,
+                user=user,
+                password=password,
+                database=database,
+                connection_timeout=5,  # Prevents script from hanging indefinitely
+                use_pure=True  # Ensures pure Python implementation for better compatibility
             )
         except MySQLError as e:
             raise DatabaseConnectionError(str(e)) from e
