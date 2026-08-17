@@ -35,16 +35,17 @@ class AnalyticsManager:
         }
 
     def attrition_rate_by_department(self):
-        """Reads from OLTP because Dim_Employee does not currently store attrition."""
-        query = """
-            SELECT d.department_name,
-                   ROUND(100.0 * SUM(CASE WHEN e.attrition = 'Yes' THEN 1 ELSE 0 END)
-                         / COUNT(*), 2) AS attrition_rate_pct
-            FROM EMPLOYEES e
-            JOIN DEPARTMENTS d ON e.department_id = d.department_id
-            GROUP BY d.department_name
-        """
-        return self.oltp_db.execute_query(query)
+            """Calculates departmental attrition rate strictly from OLAP Data Warehouse."""
+            query = """
+                SELECT 
+                    d.department_name,
+                    ROUND(100.0 * SUM(CASE WHEN e.attrition = 'Yes' THEN 1 ELSE 0 END) / COUNT(*), 2) AS attrition_rate_pct
+                FROM Dim_Employee e
+                JOIN Dim_Department d ON e.department_id = d.department_id
+                WHERE e.is_current = 1
+                GROUP BY d.department_name
+            """
+            return self.olap_db.execute_query(query)
 
     def avg_income_by_role(self):
         """Calculates average monthly income per role directly from Dim_Employee."""
