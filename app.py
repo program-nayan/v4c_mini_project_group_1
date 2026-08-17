@@ -1,3 +1,9 @@
+import sys
+import os 
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'backend')))
+
 import streamlit as st
 from components.forms import render_operational_forms
 from components.charts import render_analytics_dashboard
@@ -30,7 +36,7 @@ elif page == "📝 Operational Management (OLTP)":
 
 else:
     st.header("⚙️ System & Infrastructure Status")
-    st.success("Frontend UI active. Ready to plug in Member 2 DAL Managers.")
+    st.success("Frontend UI active.")
     
     st.markdown("### Architecture Layer Overview")
     col1, col2, col3 = st.columns(3)

@@ -3,6 +3,10 @@ import pandas as pd
 import plotly.express as px
 from backend.analytics_manager import AnalyticsManager
 
+@st.cache_resource
+def get_analytics_manager():
+    return AnalyticsManager()
+
 def render_analytics_dashboard():
     """Renders OLAP Executive Dashboards backed by AnalyticsManager."""
     
@@ -61,15 +65,18 @@ def render_analytics_dashboard():
         st.caption("SQL Execution: DENSE_RANK() OVER (PARTITION BY department_name ORDER BY performance_rating DESC)")
         
         if db_live and not df_top_performers.empty:
+            # Ensure employee_id is treated as a string label for Plotly bar orientation
+            df_top_performers["employee_id_str"] = df_top_performers["employee_id"].astype(str)
+            
             fig_rank = px.bar(
                 df_top_performers,
                 x="performance_rating",
-                y="employee_id",
+                y="employee_id_str",
                 color="department_name",
                 text="rnk",
                 orientation="h",
                 title="Top Performers Rank per Department",
-                labels={"performance_rating": "Performance Rating", "employee_id": "Employee ID", "rnk": "Rank"}
+                labels={"performance_rating": "Performance Rating", "employee_id_str": "Employee ID", "rnk": "Rank"}
             )
             fig_rank.update_traces(texttemplate='Rank #%{text}', textposition='outside')
             st.plotly_chart(fig_rank, use_container_width=True)

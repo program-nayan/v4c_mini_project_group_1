@@ -1,4 +1,4 @@
-from db_manager import DatabaseConnection
+from backend.db_manager import DatabaseConnection
 from config import DB_HOST, DB_USER, DB_PASSWORD, DB_OLTP_NAME, DB_OLAP_NAME
 
 
@@ -46,7 +46,7 @@ class AnalyticsManager:
 
     def top_performers_by_department(self, top_n=3):
         query = """
-            SELECT department_name, employee_id, performance_rating FROM (
+            SELECT department_name, employee_id, performance_rating, rnk FROM (
                 SELECT d.department_name, e.employee_id, f.performance_rating,
                        DENSE_RANK() OVER (
                            PARTITION BY d.department_name ORDER BY f.performance_rating DESC
