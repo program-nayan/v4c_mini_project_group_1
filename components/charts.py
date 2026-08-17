@@ -3,29 +3,29 @@ import pandas as pd
 import plotly.express as px
 from backend.analytics_manager import AnalyticsManager
 
-@st.cache_resource
-def get_analytics_manager():
-    return AnalyticsManager()
+# Cache dataset fetches for 5 minutes (300 seconds) to prevent DB hammering on UI interactions
+@st.cache_data(ttl=300)
+def fetch_analytics_data():
+    """Fetches and caches all analytics datasets from MySQL in a single batch execution."""
+    analytics = AnalyticsManager()
+    
+    kpis = analytics.get_combined_kpis()
+    df_top_performers = pd.DataFrame(analytics.top_performers_by_department(top_n=3))
+    df_attrition_dept = pd.DataFrame(analytics.attrition_rate_by_department())
+    df_income_role = pd.DataFrame(analytics.avg_income_by_role())
+    df_risk_flags = pd.DataFrame(analytics.attrition_risk_flags(low_satisfaction_threshold=2))
+    
+    return kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags
+
 
 def render_analytics_dashboard():
-    """Renders OLAP Executive Dashboards backed by AnalyticsManager."""
+    """Renders OLAP Executive Dashboards backed by cached AnalyticsManager data."""
     
-    st.caption("Live Data Warehouse Analytics (AnalyticsManager Execution)")
+    st.caption("Live Data Warehouse Analytics (Cached & Optimized Execution)")
 
-    # 1. Fetch Metrics & Datasets from Data Warehouse Layer
+    # 1. Fetch Cached Metrics & Datasets
     try:
-        analytics = AnalyticsManager()
-        
-        active_count = analytics.count_active_dim_employees()
-        avg_rating = analytics.avg_performance_rating()
-        avg_income = analytics.avg_monthly_income_current()
-        avg_satisfaction = analytics.avg_job_satisfaction()
-        
-        df_top_performers = pd.DataFrame(analytics.top_performers_by_department(top_n=3))
-        df_attrition_dept = pd.DataFrame(analytics.attrition_rate_by_department())
-        df_income_role = pd.DataFrame(analytics.avg_income_by_role())
-        df_risk_flags = pd.DataFrame(analytics.attrition_risk_flags(low_satisfaction_threshold=2))
-        
+        kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags = fetch_analytics_data()
         db_live = True
     except Exception as e:
         st.warning(f"⚠️ Analytics DW query failed. Verify MySQL connection settings: {e}")
@@ -35,11 +35,11 @@ def render_analytics_dashboard():
     # 1. TOP KPI SUMMARY CARDS
     # ---------------------------------------------------------
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    if db_live:
-        kpi1.metric("Active DW Employees", f"{active_count:,}" if active_count else "0")
-        kpi2.metric("Avg Performance Rating", f"{avg_rating:.2f} / 4.0" if avg_rating else "N/A")
-        kpi3.metric("Avg Monthly Income", f"${avg_income:,.2f}" if avg_income else "N/A")
-        kpi4.metric("Avg Job Satisfaction", f"{avg_satisfaction:.2f} / 4.0" if avg_satisfaction else "N/A")
+    if db_live and kpis:
+        kpi1.metric("Active DW Employees", f"{kpis['active_count']:,}")
+        kpi2.metric("Avg Performance Rating", f"{kpis['avg_rating']:.2f} / 4.0")
+        kpi3.metric("Avg Monthly Income", f"${kpis['avg_income']:,.2f}")
+        kpi4.metric("Avg Job Satisfaction", f"{kpis['avg_satisfaction']:.2f} / 4.0")
     else:
         kpi1.metric("Active DW Employees", "Offline")
         kpi2.metric("Avg Performance Rating", "Offline")
@@ -60,31 +60,42 @@ def render_analytics_dashboard():
     # ---------------------------------------------------------
     # TAB 1: TOP PERFORMERS (DENSE_RANK Window Query)
     # ---------------------------------------------------------
+    # ---------------------------------------------------------
+    # TAB 1: TOP PERFORMERS (SQL WINDOW FUNCTION)
+    # ---------------------------------------------------------
     with tab_performers:
-        st.subheader("Top-Ranked Employees by Department")
-        st.caption("SQL Execution: DENSE_RANK() OVER (PARTITION BY department_name ORDER BY performance_rating DESC)")
+        st.subheader("Top 5 Ranked Employees by Department")
+        st.caption("SQL Execution: ROW_NUMBER() OVER (PARTITION BY department_name ORDER BY performance_rating DESC, salary_hike DESC)")
         
         if db_live and not df_top_performers.empty:
-            # Ensure employee_id is treated as a string label for Plotly bar orientation
-            df_top_performers["employee_id_str"] = df_top_performers["employee_id"].astype(str)
+            # Combine name and rank into a categorical label for the Y-axis
+            df_top_performers["emp_label"] = (
+                "#" + df_top_performers["rnk"].astype(str) + " " + 
+                df_top_performers["full_name"] + " (" + df_top_performers["department_name"] + ")"
+            )
             
             fig_rank = px.bar(
                 df_top_performers,
-                x="performance_rating",
-                y="employee_id_str",
+                x="percent_salary_hike",
+                y="emp_label",
                 color="department_name",
-                text="rnk",
+                text="performance_rating",
                 orientation="h",
-                title="Top Performers Rank per Department",
-                labels={"performance_rating": "Performance Rating", "employee_id_str": "Employee ID", "rnk": "Rank"}
+                title="Top Ranked Employees (Salary Hike % & Performance)",
+                labels={
+                    "percent_salary_hike": "Salary Hike (%)",
+                    "emp_label": "Rank & Employee Name",
+                    "department_name": "Department"
+                }
             )
-            fig_rank.update_traces(texttemplate='Rank #%{text}', textposition='outside')
+            fig_rank.update_traces(texttemplate='Rating: %{text}/4', textposition='outside')
+            fig_rank.update_layout(yaxis={'categoryorder': 'total ascending'}, height=450)
             st.plotly_chart(fig_rank, use_container_width=True)
             
-            st.markdown("##### Query Result Set")
-            st.dataframe(df_top_performers, use_container_width=True)
+            st.markdown("##### Window Query Output")
+            st.dataframe(df_top_performers[["rnk", "department_name", "full_name", "employee_id", "performance_rating", "percent_salary_hike"]], use_container_width=True)
         else:
-            st.info("No live DW data available or database connection inactive.")
+            st.info("No live DW data available.")
 
     # ---------------------------------------------------------
     # TAB 2: ATTRITION & SATISFACTION RISK

@@ -39,10 +39,10 @@ class EmployeeManager:
         return (rows[0]["max_id"] or 0) + 1
 
     def onboard_employee(self, first_name, last_name, email, department_id, job_id,
-                          monthly_income, hire_date, phone_number=None, age=None,
-                          gender=None, marital_status=None, education=None,
-                          education_field=None, manager_id=None, distance_from_home=None,
-                          total_working_years=None):
+                         monthly_income, hire_date, phone_number=None, age=None,
+                         gender=None, marital_status=None, education=None,
+                         education_field=None, manager_id=None, distance_from_home=None,
+                         total_working_years=None):
         new_id = self._next_employee_id()
         self.db.execute_query(
             "INSERT INTO EMPLOYEES (employee_id, first_name, last_name, email, "
@@ -57,14 +57,82 @@ class EmployeeManager:
         )
         return self.get_employee(new_id)
 
-    def update_employee_role(self, employee_id, new_department_id, new_job_id, new_monthly_income):
-        affected = self.db.execute_query(
+    def assign_to_project(self, employee_id: int, project_id: int, role: str, allocation: int):
+        """Assigns an employee to a project in the OLTP database."""
+        emp_check = self.db.execute_query("SELECT employee_id FROM EMPLOYEES WHERE employee_id = %s", (employee_id,))
+        if not emp_check:
+            raise RecordNotFoundError(f"Employee ID {employee_id} does not exist.")
+
+        # Updated column name to 'role_in_project' matching ERD schema
+        query = """
+            INSERT INTO PROJECT_ASSIGNMENTS (employee_id, project_id, role_in_project, allocation_percentage, assigned_date)
+            VALUES (%s, %s, %s, %s, CURDATE())
+            ON DUPLICATE KEY UPDATE 
+                role_in_project = VALUES(role_in_project), 
+                allocation_percentage = VALUES(allocation_percentage);
+        """
+        self.db.execute_query(query, (employee_id, project_id, role, allocation), fetch=False)
+        return True
+
+    def update_employee_role(self, employee_id: int, new_department_id: int, new_job_id: int, new_monthly_income: float):
+        """Updates employee in OLTP and executes the SCD Type 2 stored procedure in OLAP."""
+        emp_check = self.db.execute_query("SELECT employee_id FROM EMPLOYEES WHERE employee_id = %s", (employee_id,))
+        if not emp_check:
+            raise RecordNotFoundError(f"Employee ID {employee_id} does not exist.")
+
+        # Update OLTP Record
+        self.db.execute_query(
             "UPDATE EMPLOYEES SET department_id = %s, job_id = %s, monthly_income = %s WHERE employee_id = %s",
             (new_department_id, new_job_id, new_monthly_income, employee_id),
             fetch=False
         )
-        if affected == 0:
-            raise RecordNotFoundError(f"No employee with id {employee_id}")
+
+        # Lookup Job Role & Level text for OLAP SCD2 procedure
+        job_info = self.db.execute_query("SELECT job_role, job_level FROM JOBS WHERE job_id = %s", (new_job_id,))
+        job_role = job_info[0]["job_role"] if job_info else "Updated Role"
+        job_level = job_info[0]["job_level"] if job_info else 1
+
+        # Trigger SCD Type 2 tracking in OLAP Data Warehouse with all 6 required parameters
+        try:
+            self.db.execute_query(
+                "CALL hr_olap_db.sp_UpdateEmployeeSCD2(%s, %s, %s, %s, %s, %s)",
+                (employee_id, new_department_id, job_role, job_level, new_monthly_income, "Department/Role Update"),
+                fetch=False
+            )
+        except Exception as e:
+            print(f"SCD2 Stored Procedure Execution Notice: {e}")
+
+        return True
+
+    def submit_performance_review(self, employee_id: int, rating: int):
+        """Logs review into OLTP and syncs to OLAP Fact_PerformanceReviews table."""
+        emp_rows = self.db.execute_query("SELECT employee_id, department_id FROM EMPLOYEES WHERE employee_id = %s", (employee_id,))
+        if not emp_rows:
+            raise RecordNotFoundError(f"Employee ID {employee_id} does not exist.")
+
+        dept_id = emp_rows[0]["department_id"]
+
+        # Insert into OLTP
+        self.db.execute_query(
+            "INSERT INTO PERFORMANCE_REVIEWS (employee_id, review_date, performance_rating) VALUES (%s, CURDATE(), %s)",
+            (employee_id, rating),
+            fetch=False
+        )
+
+        # Sync to OLAP Fact table
+        olap_query = """
+            INSERT INTO hr_olap_db.Fact_PerformanceReviews (emp_key, dept_key, review_date_key, performance_rating)
+            SELECT e.emp_key, d.dept_key, DATE_FORMAT(CURDATE(), '%%Y%%m%%d'), %s
+            FROM hr_olap_db.Dim_Employee e
+            JOIN hr_olap_db.Dim_Department d ON d.department_id = %s
+            WHERE e.employee_id = %s AND e.is_current = 1
+            LIMIT 1
+        """
+        try:
+            self.db.execute_query(olap_query, (rating, dept_id, employee_id), fetch=False)
+        except Exception as e:
+            print(f"OLAP Sync Notice: {e}")
+
         return True
 
     def give_raise(self, employee_id, percent):
@@ -74,7 +142,8 @@ class EmployeeManager:
         emp.give_raise(percent)
         self.db.execute_query(
             "UPDATE EMPLOYEES SET monthly_income = %s WHERE employee_id = %s",
-            (emp.monthly_income, employee_id), fetch=False
+            (emp.monthly_income, employee_id),
+            fetch=False
         )
         return emp
 

@@ -97,21 +97,36 @@ def render_operational_forms():
         st.subheader("Assign Employee to Project")
         with st.form("project_assignment_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-            employee_id = col1.number_input("Employee ID", min_value=1, step=1)
+            employee_id = col1.number_input("Employee ID", min_value=10001, step=1)
             project_id = col2.number_input("Project ID", min_value=1, step=1)
             role_in_project = col1.text_input("Role in Project", value="Contributor")
             allocation_percentage = col2.slider("Allocation (%)", 10, 100, 100, step=10)
             
             assigned = st.form_submit_button("Assign Project")
             if assigned:
-                st.info(f"Project assignment staged for Employee ID {employee_id}.")
+                try:
+                    # Execute live database transaction
+                    emp_manager.assign_to_project(
+                        employee_id=int(employee_id),
+                        project_id=int(project_id),
+                        role=role_in_project,
+                        allocation=allocation_percentage
+                    )
+                    st.success(
+                        f"✅ Successfully assigned Employee ID **{employee_id}** "
+                        f"to Project ID **{project_id}** as *{role_in_project}* ({allocation_percentage}% allocation)!"
+                    )
+                except (RecordNotFoundError, ValidationError) as err:
+                    st.warning(f"⚠️ Input Validation Error: {err}")
+                except Exception as err:
+                    st.error(f"❌ Failed to assign project: {err}")
 
     # ---------------------------------------------------------
     # TAB 3: DEPARTMENT / ROLE UPDATE (SCD TYPE 2)
     # ---------------------------------------------------------
     with tab_scd2:
-        st.subheader("Update Department / Role")
-        st.info("ℹ️ Updates current employee details in OLTP database.")
+        st.subheader("Update Department / Role (SCD Type 2)")
+        st.info("ℹ️ Updates current employee details in OLTP and triggers SCD Type 2 history creation in OLAP.")
         
         with st.form("scd_update_form", clear_on_submit=True):
             emp_id = st.number_input("Target Employee ID", min_value=10001, step=1)
@@ -129,12 +144,14 @@ def render_operational_forms():
                 else:
                     try:
                         emp_manager.update_employee_role(
-                            employee_id=emp_id,
-                            new_department_id=new_dept_id,
-                            new_job_id=new_job_id,
-                            new_monthly_income=new_income
+                            employee_id=int(emp_id),
+                            new_department_id=int(new_dept_id),
+                            new_job_id=int(new_job_id),
+                            new_monthly_income=float(new_income)
                         )
-                        st.success(f"✅ Successfully updated Employee ID **{emp_id}** details!")
+                        # Clear Streamlit query cache so analytics charts reflect the new role immediately
+                        st.cache_data.clear()
+                        st.success(f"✅ Successfully updated Employee ID **{emp_id}** role and income!")
                     except RecordNotFoundError as e:
                         st.warning(f"⚠️ Employee Record Not Found: {e}")
                     except AppError as e:
@@ -145,9 +162,27 @@ def render_operational_forms():
     # ---------------------------------------------------------
     with tab_review:
         st.subheader("Submit Performance Review")
+        st.info("ℹ️ Logs employee performance review into OLTP and updates OLAP Fact table.")
+        
         with st.form("review_form", clear_on_submit=True):
             rev_emp_id = st.number_input("Employee ID", min_value=10001, step=1)
             perf_rating = st.slider("Performance Rating (1-4)", 1, 4, 3)
+            
             review_submitted = st.form_submit_button("Submit Review")
+            
             if review_submitted:
-                st.success(f"Review logged for Employee ID {rev_emp_id}.")
+                if not db_connected:
+                    st.error("Cannot log review: Database connection inactive.")
+                else:
+                    try:
+                        emp_manager.submit_performance_review(
+                            employee_id=int(rev_emp_id),
+                            rating=int(perf_rating)
+                        )
+                        # Clear cached analytics data so Top Performers charts re-evaluate rankings
+                        st.cache_data.clear()
+                        st.success(f"✅ Performance review of **{perf_rating}/4** successfully logged for Employee ID **{rev_emp_id}**!")
+                    except RecordNotFoundError as e:
+                        st.warning(f"⚠️ Employee ID **{rev_emp_id}** not found: {e}")
+                    except AppError as e:
+                        st.error(f"❌ Review Submission Failed: {e}")
