@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS Dim_Date (
     day_of_week VARCHAR(20) NOT NULL
 );
 
+
 -- ========================================================
 -- 4. DIMENSION: Dim_Employee (SCD Type 2)
 -- ========================================================
@@ -53,7 +54,8 @@ CREATE TABLE IF NOT EXISTS Dim_Employee (
     effective_start_date DATE NOT NULL,       -- SCD2 Trackers
     effective_end_date DATE NOT NULL,         -- SCD2 Trackers
     is_current TINYINT NOT NULL DEFAULT 1,    -- SCD2 Active Flag (1=Active, 0=Expired)
-    change_reason VARCHAR(100)
+    change_reason VARCHAR(100),
+    attrition VARCHAR(10) DEFAULT 'No'
 );
 
 -- Indexing for fast SCD2 lookup and JOIN joins
@@ -85,18 +87,18 @@ CREATE TABLE IF NOT EXISTS Fact_PerformanceReviews (
 
 
 
-
 ----------------- Populate Dimensions & Fact Table---------------------------
 
 
 
 USE hr_olap_db;
 
+
 -- --------------------------------------------------------
 -- A. POPULATE Dim_Department
 -- --------------------------------------------------------
 INSERT INTO Dim_Department (department_id, department_name, location)
-SELECT department_id, department_name, location 
+SELECT department_id, department_name, location
 FROM hr_oltp_db.DEPARTMENTS;
 
 -- --------------------------------------------------------
@@ -146,12 +148,14 @@ DROP PROCEDURE PopulateDimDate;
 -- --------------------------------------------------------
 -- D. POPULATE Dim_Employee (BULK SCD TYPE 2 INGESTION: ~100k+ Rows)
 -- --------------------------------------------------------
+
 INSERT INTO Dim_Employee (
-    employee_id, full_name, email, job_role, job_level, 
-    monthly_income, department_id, hire_date, 
-    effective_start_date, effective_end_date, is_current, change_reason
+    employee_id, full_name, email, job_role, job_level,
+    monthly_income, department_id, hire_date,
+    effective_start_date, effective_end_date, is_current,
+    change_reason, attrition
 )
-SELECT 
+SELECT
     s.employee_id,
     CONCAT(s.first_name, ' ', s.last_name) AS full_name,
     s.email,
@@ -163,21 +167,23 @@ SELECT
     s.effective_start_date,
     s.effective_end_date,
     s.is_current,
-    s.change_reason
+    s.change_reason,
+    s.Attrition
 FROM hr_staging_db.staging_employees s
 ORDER BY s.employee_id, s.effective_start_date;
+
 
 -- --------------------------------------------------------
 -- E. POPULATE Fact_PerformanceReviews
 -- --------------------------------------------------------
 -- Links Fact records to the specific historical Dim_Employee version active on review_date
 INSERT INTO Fact_PerformanceReviews (
-    emp_key, dept_key, project_key, review_date_key, 
-    environment_satisfaction, job_satisfaction, 
-    relationship_satisfaction, job_involvement, 
+    emp_key, dept_key, project_key, review_date_key,
+    environment_satisfaction, job_satisfaction,
+    relationship_satisfaction, job_involvement,
     performance_rating, percent_salary_hike, monthly_income
 )
-SELECT 
+SELECT
     e.emp_key,
     d.dept_key,
     COALESCE(p.project_key, 1) AS project_key,  -- Default to 1 (Unassigned) if no project
@@ -191,14 +197,12 @@ SELECT
     s.MonthlyIncome
 FROM hr_staging_db.staging_employees s
 -- Match exact historical surrogate key (emp_key) based on date window
-JOIN Dim_Employee e 
-  ON s.employee_id = e.employee_id 
+JOIN Dim_Employee e
+  ON s.employee_id = e.employee_id
  AND s.effective_start_date = e.effective_start_date
-JOIN Dim_Department d 
+JOIN Dim_Department d
   ON s.department_id = d.department_id
-LEFT JOIN hr_oltp_db.PROJECT_ASSIGNMENTS pa 
+LEFT JOIN hr_oltp_db.PROJECT_ASSIGNMENTS pa
   ON s.employee_id = pa.employee_id
-LEFT JOIN Dim_Project p 
+LEFT JOIN Dim_Project p
   ON pa.project_id = p.project_id;
-  
-  
