@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 # 2. Main Header
-st.title("🏢 Enterprise HR Analytics & DW Platform")
+st.title("Enterprise HR Analytics & DW Platform")
 st.caption("Unified Operational Management (OLTP), Data Warehousing (OLAP) & AI Query Engine")
 st.divider()
 

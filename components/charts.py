@@ -42,12 +42,12 @@ def render_analytics_dashboard():
     # ---------------------------------------------------------
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     if db_live and kpis:
-        kpi1.metric("Active DW Employees", f"{kpis['active_count']:,}")
+        kpi1.metric("Active Employees", f"{kpis['active_count']:,}")
         kpi2.metric("Avg Performance Rating", f"{kpis['avg_rating']:.2f} / 4.0")
         kpi3.metric("Avg Monthly Income", f"${kpis['avg_income']:,.2f}")
         kpi4.metric("Avg Job Satisfaction", f"{kpis['avg_satisfaction']:.2f} / 4.0")
     else:
-        kpi1.metric("Active DW Employees", "Offline")
+        kpi1.metric("Active Employees", "Offline")
         kpi2.metric("Avg Performance Rating", "Offline")
         kpi3.metric("Avg Monthly Income", "Offline")
         kpi4.metric("Avg Job Satisfaction", "Offline")
