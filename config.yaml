@@ -7,3 +7,7 @@ paths:
 database:
   staging_table: "staging_employees"
   chunksize: 5000
+
+gemini:
+  model_name: "gemini-3.6-flash"
+  temperature: 0.1
