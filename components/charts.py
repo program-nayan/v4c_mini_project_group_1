@@ -1,12 +1,16 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from backend.logger import get_logger
 from backend.analytics_manager import AnalyticsManager
+
+logger = get_logger(__name__)
 
 # Cache dataset fetches for 5 minutes (300 seconds) to prevent DB hammering on UI interactions
 @st.cache_data(ttl=300)
 def fetch_analytics_data():
     """Fetches and caches all analytics datasets from MySQL in a single batch execution."""
+    logger.info("Executing batch analytics data fetch from OLAP Data Warehouse (caching for 300s)")
     analytics = AnalyticsManager()
     
     kpis = analytics.get_combined_kpis()
@@ -15,12 +19,13 @@ def fetch_analytics_data():
     df_income_role = pd.DataFrame(analytics.avg_income_by_role())
     df_risk_flags = pd.DataFrame(analytics.attrition_risk_flags(low_satisfaction_threshold=2))
     
+    logger.info("Successfully fetched and cached all analytics datasets")
     return kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags
 
 
 def render_analytics_dashboard():
     """Renders OLAP Executive Dashboards backed by cached AnalyticsManager data."""
-    
+    logger.info("Rendering Executive Analytics Dashboard")
     st.caption("Live Data Warehouse Analytics (Cached & Optimized Execution)")
 
     # 1. Fetch Cached Metrics & Datasets
@@ -28,6 +33,7 @@ def render_analytics_dashboard():
         kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags = fetch_analytics_data()
         db_live = True
     except Exception as e:
+        logger.error("Analytics DW query failed. Operating in offline/fallback mode. Error: %s", e, exc_info=True)
         st.warning(f"⚠️ Analytics DW query failed. Verify MySQL connection settings: {e}")
         db_live = False
 
@@ -57,9 +63,6 @@ def render_analytics_dashboard():
         "💼 Compensation by Job Role"
     ])
 
-    # ---------------------------------------------------------
-    # TAB 1: TOP PERFORMERS (DENSE_RANK Window Query)
-    # ---------------------------------------------------------
     # ---------------------------------------------------------
     # TAB 1: TOP PERFORMERS (SQL WINDOW FUNCTION)
     # ---------------------------------------------------------

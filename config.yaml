@@ -1,7 +1,7 @@
 # Data Paths Configuration
 paths:
-  raw_data: "data/raw/WA_Fn-UseC_-HR-Employee-Attrition.csv"
-  processed_data: "data/processed/synthesized_employee_data.csv"
+  raw_data: "../data/raw/WA_Fn-UseC_-HR-Employee-Attrition.csv"
+  processed_data: "../data/processed/synthesized_employee_data.csv"
 
 # Staging Database Ingestion Settings
 database:
@@ -9,5 +9,5 @@ database:
   chunksize: 5000
 
 gemini:
-  model_name: "gemini-3.6-flash"
+  model_name: "gemini-3.5-flash"
   temperature: 0.1

@@ -1,4 +1,11 @@
-from exceptions import ValidationError
+try:
+    from backend.logger import get_logger
+    from backend.exceptions import ValidationError
+except ImportError:
+    from logger import get_logger
+    from exceptions import ValidationError
+
+logger = get_logger(__name__)
 
 
 class Employee:
@@ -21,6 +28,7 @@ class Employee:
     @monthly_income.setter
     def monthly_income(self, value):
         if value < 0:
+            logger.error("Validation failed: monthly_income cannot be negative (attempted: %s)", value)
             raise ValidationError("monthly_income cannot be negative")
         self._monthly_income = value
 
@@ -30,8 +38,17 @@ class Employee:
 
     def give_raise(self, percent):
         if percent <= 0:
+            logger.error("Validation failed: raise percent must be positive (attempted: %s)", percent)
             raise ValidationError("percent must be positive")
+        old_income = self.monthly_income
         self.monthly_income = round(self.monthly_income * (1 + percent / 100), 2)
+        logger.info(
+            "Employee ID %s received a %s%% raise: $%s -> $%s",
+            self.employee_id,
+            percent,
+            old_income,
+            self.monthly_income,
+        )
 
     def __repr__(self):
         return f"<Employee {self.employee_id} {self.full_name} ({self.department})>"
@@ -67,6 +84,7 @@ class Review:
     @performance_rating.setter
     def performance_rating(self, value):
         if not (1 <= value <= 4):
+            logger.error("Validation failed: performance_rating must be between 1 and 4 (attempted: %s)", value)
             raise ValidationError("performance_rating must be between 1 and 4")
         self._performance_rating = value
 

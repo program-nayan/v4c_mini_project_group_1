@@ -18,3 +18,7 @@ data/*.csv
 
 # macOS
 .DS_Store
+
+# Logs
+logs/
+*.log

@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
+from backend.logger import get_logger
 from backend.db_manager import DatabaseConnection
 from backend.exceptions import AppError
 from backend.config import DB_OLAP_NAME, DB_OLTP_NAME, DB_HOST, DB_USER, DB_PASSWORD
+
+logger = get_logger(__name__)
 
 # =========================================================
 # 1. LOAD CONFIG.YAML DIRECTLY FROM ROOT DIRECTORY
@@ -19,13 +22,21 @@ CONFIG_YAML_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "con
 
 def load_yaml_config() -> dict:
     if os.path.exists(CONFIG_YAML_PATH):
-        with open(CONFIG_YAML_PATH, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+        try:
+            with open(CONFIG_YAML_PATH, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+                logger.info("Loaded chatbot configuration from %s", CONFIG_YAML_PATH)
+                return cfg
+        except Exception as e:
+            logger.error("Failed to load config.yaml at %s: %s", CONFIG_YAML_PATH, e)
+            return {}
+    logger.warning("config.yaml not found at %s", CONFIG_YAML_PATH)
     return {}
 
 yaml_config = load_yaml_config()
 GEMINI_MODEL_NAME = yaml_config.get("gemini", {}).get("model_name", "gemini-2.5-flash")
 GEMINI_TEMPERATURE = float(yaml_config.get("gemini", {}).get("temperature", 0.1))
+logger.info("AI Chatbot configured with model='%s', temperature=%s", GEMINI_MODEL_NAME, GEMINI_TEMPERATURE)
 
 # =========================================================
 # 2. PYDANTIC SCHEMA FOR STRICT STRUCTURED OUTPUT
@@ -74,9 +85,11 @@ def validate_sql_security(sql_query: str) -> tuple[bool, str]:
     query_clean = sql_query.strip().upper()
     
     if ";" in query_clean[:-1]:
+        logger.warning("Security policy violation: Multi-statement query detected")
         return False, "Multi-statement queries (containing semicolons) are prohibited."
     
     if not (query_clean.startswith("SELECT") or query_clean.startswith("WITH")):
+        logger.warning("Security policy violation: Query does not start with SELECT or WITH")
         return False, "Query must strictly begin with SELECT or WITH."
         
     forbidden_keywords = [
@@ -85,30 +98,38 @@ def validate_sql_security(sql_query: str) -> tuple[bool, str]:
     ]
     for word in forbidden_keywords:
         if re.search(rf"\b{word}\b", query_clean):
+            logger.warning("Security policy violation: Forbidden keyword '%s' found in query", word)
             return False, f"Forbidden keyword detected: '{word}'."
             
+    logger.debug("SQL query passed security validation")
     return True, "Valid"
 
 def inject_limit_clause(sql_query: str, max_limit: int = 100) -> str:
     """Appends LIMIT clause if not present to prevent UI memory strain."""
     if not re.search(r"\bLIMIT\s+\d+", sql_query, re.IGNORECASE):
+        logger.debug("Appending default LIMIT %d clause to query", max_limit)
         sql_query = sql_query.rstrip(";") + f" LIMIT {max_limit};"
     return sql_query
 
 def execute_generated_query(target_db_type: str, sql_query: str) -> pd.DataFrame:
     """Executes query against target database using db_manager."""
     db_name = DB_OLAP_NAME if target_db_type.upper() == "OLAP" else DB_OLTP_NAME
+    logger.info("Executing AI-generated query against [%s]: %s", db_name, sql_query)
     conn = DatabaseConnection(database=db_name, host=DB_HOST, user=DB_USER, password=DB_PASSWORD)
     results = conn.execute_query(sql_query)
-    return pd.DataFrame(results)
+    df = pd.DataFrame(results)
+    logger.info("Query returned %d rows from [%s]", len(df), db_name)
+    return df
 
 # =========================================================
 # 5. AI QUERY GENERATOR
 # =========================================================
 def generate_and_validate_sql(user_prompt: str, max_retries: int = 2) -> dict:
     """Uses google-genai Client with Pydantic structured schema validation."""
+    logger.info("Processing user natural language prompt: '%s'", user_prompt)
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
+        logger.error("Missing Gemini API Key in environment")
         raise ValueError("Missing API Key. Please set `GEMINI_API_KEY` in your `.env` file.")
         
     client = genai.Client(api_key=api_key)
@@ -117,6 +138,7 @@ def generate_and_validate_sql(user_prompt: str, max_retries: int = 2) -> dict:
     conversation_history = []
     
     for attempt in range(max_retries + 1):
+        logger.info("Dispatching query generation request to Gemini (Attempt %d/%d)", attempt + 1, max_retries + 1)
         prompt_content = current_prompt
         if conversation_history:
             prompt_content += "\n\nPrevious Failed Attempts & Error Logs:\n" + "\n".join(conversation_history)
@@ -138,6 +160,8 @@ def generate_and_validate_sql(user_prompt: str, max_retries: int = 2) -> dict:
             raw_sql = payload.get("sql_query", "")
             explanation = payload.get("explanation", "")
             
+            logger.info("Generated SQL (Target DB: %s): %s", target_db, raw_sql)
+            
             is_safe, error_msg = validate_sql_security(raw_sql)
             if not is_safe:
                 raise ValueError(f"Security Policy Violation: {error_msg}")
@@ -145,6 +169,7 @@ def generate_and_validate_sql(user_prompt: str, max_retries: int = 2) -> dict:
             safe_sql = inject_limit_clause(raw_sql)
             df_result = execute_generated_query(target_db, safe_sql)
             
+            logger.info("Successfully generated and executed AI query for prompt: '%s'", user_prompt)
             return {
                 "target_db": target_db,
                 "sql_query": safe_sql,
@@ -154,7 +179,9 @@ def generate_and_validate_sql(user_prompt: str, max_retries: int = 2) -> dict:
             
         except Exception as e:
             err_str = str(e)
+            logger.warning("Attempt %d failed: %s", attempt + 1, err_str)
             if attempt == max_retries:
+                logger.error("All %d query generation attempts failed. Last error: %s", max_retries + 1, err_str)
                 raise RuntimeError(f"Failed after {max_retries + 1} attempts. Last Error: {err_str}")
             
             conversation_history.append(f"Attempt {attempt + 1} SQL: {raw_sql if 'raw_sql' in locals() else 'N/A'}")
@@ -166,6 +193,7 @@ def generate_and_validate_sql(user_prompt: str, max_retries: int = 2) -> dict:
 # =========================================================
 def render_sql_chatbot():
     """Renders Streamlit Chatbot Interface."""
+    logger.info("Rendering AI Data Analyst Chatbot interface")
     st.subheader("💬 AI Data Analyst Assistant")
     st.caption(f"Active Model: `{GEMINI_MODEL_NAME}` | Ask natural language questions about workforce metrics or performance reviews.")
 
@@ -191,6 +219,7 @@ def render_sql_chatbot():
                     st.info("ℹ️ Query executed successfully, but returned 0 rows.")
 
     if user_input := st.chat_input("e.g., Show top 5 earners in Sales and their performance rating"):
+        logger.info("Chat input received from user: '%s'", user_input)
         st.session_state.chat_messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
@@ -219,5 +248,6 @@ def render_sql_chatbot():
 
                 except Exception as err:
                     err_msg = f"❌ **Error generating query:** {err}"
+                    logger.error("Chatbot response generation failed: %s", err, exc_info=True)
                     st.error(err_msg)
                     st.session_state.chat_messages.append({"role": "assistant", "content": err_msg})
