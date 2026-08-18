@@ -1,28 +1,43 @@
 import os
-import pandas as pd
 import urllib.parse
+import yaml
+import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 
-# Load environment variables from .env file
 load_dotenv()
 
 class StagingLoader:
-    """Handles the ingestion of raw synthesized CSV data into MySQL Staging without exposing passwords."""
+    """Handles raw synthesized CSV ingestion into MySQL Staging using external YAML configs."""
 
-    def __init__(self):
-        # Fetch values from environment variables with safe defaults
+    def __init__(self, config_path: str = None):
+        # Resolve config.yaml in the root folder if not explicitly provided
+        if config_path is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_path = os.path.join(base_dir, "config.yaml")
+
+        self.config = self._load_config(config_path)
+
+        # Database credentials fetched from .env
         self.db_user = os.getenv("DB_USER", "root")
         self.db_pass = os.getenv("DB_PASS", "")
         self.db_host = os.getenv("DB_HOST", "localhost")
         self.db_port = os.getenv("DB_PORT", "3306")
         self.db_name = os.getenv("DB_NAME", "hr_staging_db")
-        
+
         if not self.db_pass:
             raise ValueError("❌ Database password not found in .env file!")
-            
+
         self.engine = self._create_engine()
+
+    def _load_config(self, config_path: str) -> dict:
+        """Reads and parses the YAML configuration file."""
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"❌ Configuration file not found at: {config_path}")
+
+        with open(config_path, "r") as file:
+            return yaml.safe_load(file)
 
     def _create_engine(self):
         """Constructs an encoded SQLAlchemy connection engine."""
@@ -32,16 +47,18 @@ class StagingLoader:
 
     def load_csv_to_staging(
         self,
-        csv_path: str = "data/processed/synthesized_employee_data.csv",
-        table_name: str = "staging_employees",
-        chunksize: int = 5000,
+        csv_path: str = None,
+        table_name: str = None,
+        chunksize: int = None,
     ) -> bool:
-        """Reads the synthesized CSV file and loads it into MySQL staging table in batches."""
+        """Loads dataset into MySQL staging table using values from config.yaml as defaults."""
+        # Fall back to YAML config if parameters are not explicitly passed
+        csv_path = csv_path or self.config["paths"]["processed_data"]
+        table_name = table_name or self.config["database"]["staging_table"]
+        chunksize = chunksize or self.config["database"]["chunksize"]
+
         if not os.path.exists(csv_path):
-            if os.path.exists("synthesized_employee_data.csv"):
-                csv_path = "synthesized_employee_data.csv"
-            else:
-                raise FileNotFoundError(f"Dataset not found at: {csv_path}")
+            raise FileNotFoundError(f"❌ Dataset not found at: {csv_path}")
 
         try:
             print(f"⏳ Reading dataset from {csv_path}...")

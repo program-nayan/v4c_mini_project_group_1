@@ -1,0 +1,9 @@
+# Data Paths Configuration
+paths:
+  raw_data: "data/raw/WA_Fn-UseC_-HR-Employee-Attrition.csv"
+  processed_data: "data/processed/synthesized_employee_data.csv"
+
+# Staging Database Ingestion Settings
+database:
+  staging_table: "staging_employees"
+  chunksize: 5000
