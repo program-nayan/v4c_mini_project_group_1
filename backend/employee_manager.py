@@ -86,6 +86,29 @@ class EmployeeManager:
             fetch=False
         )
         logger.info("Successfully persisted employee record for ID: %s", new_id)
+
+        # Look up job role/level text for the OLAP dimension row
+        job_info = self.db.execute_query("SELECT job_role, job_level FROM JOBS WHERE job_id = %s", (job_id,))
+        job_role = job_info[0]["job_role"] if job_info else "Unassigned"
+        job_level = job_info[0]["job_level"] if job_info else 1
+
+        # Seed the initial SCD Type 2 record in OLAP so new hires show up on the dashboard
+        try:
+            logger.info("Inserting initial Dim_Employee SCD2 record for Employee ID %s in OLAP", new_id)
+            self.db.execute_query(
+                "INSERT INTO hr_olap_db.Dim_Employee ("
+                "  employee_id, full_name, email, job_role, job_level, monthly_income,"
+                "  department_id, hire_date, effective_start_date, effective_end_date,"
+                "  is_current, change_reason, attrition"
+                ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'9999-12-31',1,%s,'No')",
+                (new_id, f"{first_name} {last_name}", email, job_role, job_level,
+                 monthly_income, department_id, hire_date, hire_date, "New Hire"),
+                fetch=False
+            )
+            logger.info("Successfully inserted OLAP Dim_Employee record for Employee ID %s", new_id)
+        except Exception as e:
+            logger.warning("OLAP Dim_Employee insert failed for Employee ID %s: %s", new_id, e)
+
         return self.get_employee(new_id)
 
     def assign_to_project(self, employee_id: int, project_id: int, role: str, allocation: int):
@@ -141,12 +164,17 @@ class EmployeeManager:
         job_role = job_info[0]["job_role"] if job_info else "Updated Role"
         job_level = job_info[0]["job_level"] if job_info else 1
 
-        # Trigger SCD Type 2 tracking in OLAP Data Warehouse with all 6 required parameters
+        # Current attrition flag carries forward into the new SCD2 version
+        attrition_info = self.db.execute_query("SELECT attrition FROM EMPLOYEES WHERE employee_id = %s", (employee_id,))
+        attrition = attrition_info[0]["attrition"] if attrition_info else "No"
+
+        # Trigger SCD Type 2 tracking in OLAP Data Warehouse with all 7 required parameters
         try:
             logger.info("Triggering SCD Type 2 stored procedure for Employee ID %s in OLAP", employee_id)
             self.db.execute_query(
-                "CALL hr_olap_db.sp_UpdateEmployeeSCD2(%s, %s, %s, %s, %s, %s)",
-                (employee_id, new_department_id, job_role, job_level, new_monthly_income, "Department/Role Update"),
+                "CALL hr_olap_db.sp_UpdateEmployeeSCD2(%s, %s, %s, %s, %s, %s, %s)",
+                (employee_id, new_department_id, job_role, job_level, new_monthly_income,
+                 "Department/Role Update", attrition),
                 fetch=False
             )
             logger.info("SCD Type 2 stored procedure completed for Employee ID %s", employee_id)

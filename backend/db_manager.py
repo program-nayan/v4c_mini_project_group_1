@@ -43,7 +43,8 @@ class DatabaseConnection:
                 password=password,
                 database=database,
                 connection_timeout=5,  # Prevents script from hanging indefinitely
-                use_pure=True  # Ensures pure Python implementation for better compatibility
+                use_pure=True,  # Ensures pure Python implementation for better compatibility
+                autocommit=True
             )
             logger.info("Successfully connected to MySQL database: %s", database)
         except MySQLError as e:
@@ -60,6 +61,10 @@ class DatabaseConnection:
                 results = cursor.fetchall()
                 logger.debug("Query fetched %d rows from [%s]", len(results), self.database)
                 return results
+            if cursor.with_rows:
+                cursor.fetchall()
+            for pending_result in cursor.stored_results():
+                pending_result.fetchall()
             self._conn.commit()
             logger.debug("Query executed and committed on [%s]. Affected rows: %d", self.database, cursor.rowcount)
             return cursor.rowcount

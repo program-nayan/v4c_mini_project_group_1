@@ -96,6 +96,7 @@ def render_operational_forms():
                             total_working_years=total_working_years
                         )
                         logger.info("Successfully onboarded employee: %s (ID: %s)", emp.full_name, emp.employee_id)
+                        st.cache_data.clear()
                         st.success(f"✅ Employee **{emp.full_name}** successfully onboarded with ID **{emp.employee_id}**!")
                     except (ValidationError, AppError) as err:
                         logger.error("Onboarding failed with backend error: %s", err)
