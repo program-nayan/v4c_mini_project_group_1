@@ -1,39 +1,41 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from backend.logger import get_logger
 from backend.analytics_manager import AnalyticsManager
 
-logger = get_logger(__name__)
 
-# Cache dataset fetches for 5 minutes (300 seconds) to prevent DB hammering on UI interactions
 @st.cache_data(ttl=300)
 def fetch_analytics_data():
     """Fetches and caches all analytics datasets from MySQL in a single batch execution."""
-    logger.info("Executing batch analytics data fetch from OLAP Data Warehouse (caching for 300s)")
     analytics = AnalyticsManager()
     
     kpis = analytics.get_combined_kpis()
-    df_top_performers = pd.DataFrame(analytics.top_performers_by_department(top_n=3))
+    df_top_performers = pd.DataFrame(analytics.top_performers_by_department(top_n=5))
     df_attrition_dept = pd.DataFrame(analytics.attrition_rate_by_department())
     df_income_role = pd.DataFrame(analytics.avg_income_by_role())
     df_risk_flags = pd.DataFrame(analytics.attrition_risk_flags(low_satisfaction_threshold=2))
+    df_yearly_trends = pd.DataFrame(analytics.yearly_trends())
     
-    logger.info("Successfully fetched and cached all analytics datasets")
-    return kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags
+    return kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags, df_yearly_trends
 
 
 def render_analytics_dashboard():
     """Renders OLAP Executive Dashboards backed by cached AnalyticsManager data."""
-    logger.info("Rendering Executive Analytics Dashboard")
+    
     st.caption("Live Data Warehouse Analytics (Cached & Optimized Execution)")
 
     # 1. Fetch Cached Metrics & Datasets
     try:
-        kpis, df_top_performers, df_attrition_dept, df_income_role, df_risk_flags = fetch_analytics_data()
+        (
+            kpis, 
+            df_top_performers, 
+            df_attrition_dept, 
+            df_income_role, 
+            df_risk_flags, 
+            df_yearly_trends
+        ) = fetch_analytics_data()
         db_live = True
     except Exception as e:
-        logger.error("Analytics DW query failed. Operating in offline/fallback mode. Error: %s", e, exc_info=True)
         st.warning(f"⚠️ Analytics DW query failed. Verify MySQL connection settings: {e}")
         db_live = False
 
@@ -42,12 +44,12 @@ def render_analytics_dashboard():
     # ---------------------------------------------------------
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     if db_live and kpis:
-        kpi1.metric("Active Employees", f"{kpis['active_count']:,}")
+        kpi1.metric("Active DW Employees", f"{kpis['active_count']:,}")
         kpi2.metric("Avg Performance Rating", f"{kpis['avg_rating']:.2f} / 4.0")
         kpi3.metric("Avg Monthly Income", f"${kpis['avg_income']:,.2f}")
         kpi4.metric("Avg Job Satisfaction", f"{kpis['avg_satisfaction']:.2f} / 4.0")
     else:
-        kpi1.metric("Active Employees", "Offline")
+        kpi1.metric("Active DW Employees", "Offline")
         kpi2.metric("Avg Performance Rating", "Offline")
         kpi3.metric("Avg Monthly Income", "Offline")
         kpi4.metric("Avg Job Satisfaction", "Offline")
@@ -57,21 +59,21 @@ def render_analytics_dashboard():
     # ---------------------------------------------------------
     # 2. ANALYTICS TABS
     # ---------------------------------------------------------
-    tab_performers, tab_attrition, tab_compensation = st.tabs([
-        "🏆 Top Performers (DW Window Function)", 
-        "⚠️ Attrition Risk & Department Rate", 
-        "💼 Compensation by Job Role"
+    tab_performers, tab_attrition, tab_compensation, tab_yoy = st.tabs([
+        "🏆 Top Performers", 
+        "⚠️ Attrition & Risk", 
+        "💼 Compensation by Role",
+        "📈 YoY Trends"
     ])
 
     # ---------------------------------------------------------
     # TAB 1: TOP PERFORMERS (SQL WINDOW FUNCTION)
     # ---------------------------------------------------------
     with tab_performers:
-        st.subheader("Top 5 Ranked Employees by Department")
-        st.caption("SQL Execution: ROW_NUMBER() OVER (PARTITION BY department_name ORDER BY performance_rating DESC, salary_hike DESC)")
+        st.subheader("Top-Ranked Employees by Department")
+        st.caption("SQL Execution: ROW_NUMBER() OVER (PARTITION BY department_name ORDER BY performance_rating DESC)")
         
         if db_live and not df_top_performers.empty:
-            # Combine name and rank into a categorical label for the Y-axis
             df_top_performers["emp_label"] = (
                 "#" + df_top_performers["rnk"].astype(str) + " " + 
                 df_top_performers["full_name"] + " (" + df_top_performers["department_name"] + ")"
@@ -96,9 +98,12 @@ def render_analytics_dashboard():
             st.plotly_chart(fig_rank, use_container_width=True)
             
             st.markdown("##### Window Query Output")
-            st.dataframe(df_top_performers[["rnk", "department_name", "full_name", "employee_id", "performance_rating", "percent_salary_hike"]], use_container_width=True)
+            st.dataframe(
+                df_top_performers[["rnk", "department_name", "full_name", "employee_id", "performance_rating", "percent_salary_hike"]], 
+                use_container_width=True
+            )
         else:
-            st.info("No live DW data available.")
+            st.info("No live DW data available or database connection inactive.")
 
     # ---------------------------------------------------------
     # TAB 2: ATTRITION & SATISFACTION RISK
@@ -144,3 +149,66 @@ def render_analytics_dashboard():
             st.plotly_chart(fig_income, use_container_width=True)
         else:
             st.info("No compensation data available.")
+
+    # ---------------------------------------------------------
+    # TAB 4: YEAR-OVER-YEAR (YoY) TRENDS
+    # ---------------------------------------------------------
+    with tab_yoy:
+        st.subheader("Year-over-Year Performance & Compensation Trends")
+        st.caption("Aggregated historical trends calculated from Fact_PerformanceReviews & Dim_Date")
+
+        if db_live and not df_yearly_trends.empty:
+            df_yearly_trends["year_str"] = df_yearly_trends["year"].astype(str)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                fig_ratings = px.line(
+                    df_yearly_trends,
+                    x="year_str",
+                    y=["avg_rating", "avg_satisfaction"],
+                    markers=True,
+                    title="Avg Performance Rating & Satisfaction Score Over Time",
+                    labels={"year_str": "Year", "value": "Score (out of 4.0)", "variable": "Metric"}
+                )
+                fig_ratings.update_layout(legend=dict(title="Metrics"))
+                st.plotly_chart(fig_ratings, use_container_width=True)
+
+            with col2:
+                fig_income_trend = px.line(
+                    df_yearly_trends,
+                    x="year_str",
+                    y="avg_income",
+                    markers=True,
+                    title="Average Monthly Compensation ($) Over Time",
+                    labels={"year_str": "Year", "avg_income": "Avg Monthly Income ($)"}
+                )
+                st.plotly_chart(fig_income_trend, use_container_width=True)
+
+            col3, col4 = st.columns(2)
+
+            with col3:
+                fig_hike_trend = px.line(
+                    df_yearly_trends,
+                    x="year_str",
+                    y="avg_salary_hike",
+                    markers=True,
+                    title="Average Salary Hike (%) Over Time",
+                    labels={"year_str": "Year", "avg_salary_hike": "Salary Hike (%)"}
+                )
+                st.plotly_chart(fig_hike_trend, use_container_width=True)
+
+            with col4:
+                fig_reviews_vol = px.bar(
+                    df_yearly_trends,
+                    x="year_str",
+                    y="review_count",
+                    title="Total Annual Performance Reviews Completed",
+                    labels={"year_str": "Year", "review_count": "Review Count"}
+                )
+                st.plotly_chart(fig_reviews_vol, use_container_width=True)
+
+            st.markdown("##### Detailed Yearly Aggregation Table")
+            st.dataframe(df_yearly_trends.drop(columns=["year_str"]), use_container_width=True)
+        else:
+            st.info("No yearly trend data available.")
