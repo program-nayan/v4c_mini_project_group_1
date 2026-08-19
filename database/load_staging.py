@@ -60,7 +60,9 @@ class StagingLoader:
         logger.info("Creating SQLAlchemy connection engine for %s@%s:%s/%s", self.db_user, self.db_host, self.db_port, self.db_name)
         encoded_pass = urllib.parse.quote_plus(self.db_pass)
         connection_url = f"mysql+pymysql://{self.db_user}:{encoded_pass}@{self.db_host}:{self.db_port}/{self.db_name}"
-        return create_engine(connection_url)
+        return create_engine(connection_url, connect_args={
+        "init_command": "SET SESSION sql_require_primary_key = OFF;"
+    })
 
     def load_csv_to_staging(
         self,
