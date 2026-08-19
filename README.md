@@ -427,5 +427,5 @@ The system features a centralized, production-ready logging framework ([`backend
 
 ## 👥 Authors & Acknowledgments
 
-- **Project Group 1** - *Enterprise HR Analytics & DW Platform Mini Project*
+- **Project Group 1** - *Archita Jha, Bandhan Sawant, Nayan Badgujar*
 - Base Dataset: *IBM HR Analytics Employee Attrition & Performance*

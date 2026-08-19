@@ -148,6 +148,26 @@ class AnalyticsManager:
         )
         return float(rows[0]["avg_income"]) if rows and rows[0]["avg_income"] else 0.0
 
+    def yearly_trends(self):
+        """Aggregates key metrics by year for a year-over-year trend line chart."""
+        logger.info("Calculating year-over-year trends from Fact_PerformanceReviews & Dim_Date")
+        query = """
+        SELECT
+            dt.year AS year,
+            COUNT(*) AS review_count,
+            ROUND(AVG(f.performance_rating), 2) AS avg_rating,
+            ROUND(AVG(f.job_satisfaction), 2) AS avg_satisfaction,
+            ROUND(AVG(f.monthly_income), 2) AS avg_income,
+            ROUND(AVG(f.percent_salary_hike), 2) AS avg_salary_hike
+            FROM Fact_PerformanceReviews f
+            JOIN Dim_Date dt ON f.review_date_key = dt.date_key
+            GROUP BY dt.year
+            ORDER BY dt.year ASC
+        """
+        results = self.olap_db.execute_query(query)
+        logger.debug("Yearly trends retrieved for %d years", len(results))
+        return results
+
     def avg_job_satisfaction(self):
         logger.debug("Calculating overall average job satisfaction")
         rows = self.olap_db.execute_query(
