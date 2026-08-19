@@ -22,3 +22,7 @@ data/*.csv
 # Logs
 logs/
 *.log
+
+.streamlit\secrets.toml/
+
+.streamlit/
