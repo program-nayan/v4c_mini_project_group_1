@@ -3,6 +3,7 @@ from mysql.connector import Error as MySQLError
 
 try:
     from backend.logger import get_logger
+    from backend.config import DB_HOST, DB_USER, DB_PASSWORD, DB_PORT
     from backend.exceptions import (
         DatabaseConnectionError,
         QueryExecutionError,
@@ -11,6 +12,7 @@ try:
     )
 except ImportError:
     from logger import get_logger
+    from config import DB_HOST, DB_USER, DB_PASSWORD, DB_PORT
     from exceptions import (
         DatabaseConnectionError,
         QueryExecutionError,
@@ -24,31 +26,33 @@ logger = get_logger(__name__)
 class DatabaseConnection:
     _instances = {}
 
-    def __new__(cls, database, host="localhost", user="root", password=""):
+    def __new__(cls, database, host=DB_HOST, user=DB_USER, password=DB_PASSWORD, port=DB_PORT):
         if database not in cls._instances:
             logger.info("Initializing new DatabaseConnection instance for database: %s", database)
             instance = super().__new__(cls)
-            instance._connect(host, user, password, database)
+            instance._connect(host, user, password, database, port)
             cls._instances[database] = instance
         return cls._instances[database]
 
-    def _connect(self, host, user, password, database):
+    def _connect(self, host, user, password, database, port):
         self.database = database
         self.host = host
+        self.port = int(port)  # Ensure port is explicitly cast to integer
         try:
-            logger.info("Connecting to MySQL database '%s' at %s as user '%s'", database, host, user)
+            logger.info("Connecting to MySQL database '%s' at %s:%d as user '%s'", database, host, self.port, user)
             self._conn = mysql.connector.connect(
-                host=host,
+                host=self.host,
                 user=user,
                 password=password,
                 database=database,
-                connection_timeout=5,  # Prevents script from hanging indefinitely
-                use_pure=True,  # Ensures pure Python implementation for better compatibility
+                port=self.port,         # Explicitly pass the integer port number
+                connect_timeout=10,     # Standard timeout parameter in mysql.connector
+                use_pure=True,          # Ensures pure Python implementation
                 autocommit=True
             )
             logger.info("Successfully connected to MySQL database: %s", database)
         except MySQLError as e:
-            logger.error("Failed to connect to MySQL database '%s' on %s: %s", database, host, e)
+            logger.error("Failed to connect to MySQL database '%s' on %s:%d: %s", database, host, self.port, e)
             raise DatabaseConnectionError(str(e)) from e
 
     def execute_query(self, query, params=None, fetch=True):
